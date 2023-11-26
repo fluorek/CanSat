@@ -1,9 +1,9 @@
-Arduino NANO Connection to
+Fly_Station Connection to
 GPS:
 
 VCC --> 5V
-RX -->  D3
-TX -->  D4
+RX -->  TX5
+TX -->  RX5
 GND --> GND
 
 SIM800L:

@@ -40,9 +40,9 @@
  
 // Counter for picture number
 unsigned int pictureCount = 0;
- 
+
 // Delay time in millieconds
-unsigned int delayTime = 100;
+unsigned int delayTime = 0;
  
  
 void configESPCamera() {
@@ -201,6 +201,19 @@ void setup() {
   // Initialize the MicroSD
   Serial.print("Initializing the MicroSD card module... ");
   initMicroSDCard();
+  
+  // Restart protection
+  String path = "";
+  while (true) {
+    path = "/image" + String(pictureCount) + ".jpg";
+    File testImage = SD_MMC.open(path.c_str(), FILE_READ);
+    if (!testImage) {
+      testImage.close();
+      break;
+    }
+    testImage.close();
+    pictureCount++;
+  }
  
   Serial.print("Delay Time = ");
   Serial.print(delayTime);
@@ -208,7 +221,7 @@ void setup() {
 }
  
 void loop() {
- 
+  
   // Path where new image will be saved in MicroSD card
   String path = "/image" + String(pictureCount) + ".jpg";
   Serial.printf("Picture file name: %s\n", path.c_str());
@@ -220,5 +233,5 @@ void loop() {
   pictureCount++;
  
   // Delay for specified period
-  //delay(delayTime);
+  delay(delayTime);
 }

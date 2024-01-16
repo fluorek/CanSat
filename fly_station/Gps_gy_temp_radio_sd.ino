@@ -5,13 +5,18 @@
 #include <TinyGPSPlus.h>
 #include <CanSatKit.h>
 
+#define parachutePin 5
 #define ss Serial //serial connection for gps
 
-MS5611 MS5611(0x77);  // temp+pressure
-GY521 sensor(0x68);  //gy+acc
+MS5611 MS5611(0x76);  // temp+pressure
+GY521 sensor(0x68);  //gy+acc]
 TinyGPSPlus gps; // gps
 
 const int chipSelect = 11; // select sd card adress
+
+float lastHeight = 0;
+
+const int parachuteOpenPressure = 954;
 
 uint32_t counter = 0;
 
@@ -30,8 +35,7 @@ Radio radio(Pins::Radio::ChipSelect,
 
 Frame frame;
 
-void setup()
-{
+void setup(){
 
   SerialUSB.begin(115200);// begin serial connection baud rate
 
@@ -75,12 +79,14 @@ void setup()
     SerialUSB.println("MS5611 found.");
   }
 
+  pinMode(parachutePin, OUTPUT);
 }
 
 
 
-void loop()
-{
+void loop(){
+  checkHeight();
+  
   //check conection to gps
   while (ss.available() > 0)
     gps.encode(ss.read());
@@ -154,6 +160,19 @@ void gy() {
   int t = sensor.getTemperature();
 
 }
+
+void checkHeight() {
+  if(lastHeight > MS5611.getPressure()){
+    if(MS5611.getPressure() <= parachuteOpenPressure){
+      digitalWrite(parachutePin, HIGH);
+      File logFile = SD.open("log.txt", FILE_WRITE);
+      logFile.print("Parachute open. Pressure: ");
+      logFile.println(MS5611.getPressure());
+    }
+  }
+  lastHeight = MS5611.getPressure();
+}
+
 void card() {
 
 

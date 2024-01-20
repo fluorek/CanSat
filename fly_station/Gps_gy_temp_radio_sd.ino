@@ -1,22 +1,25 @@
-#include "MS5611.h"
 #include "GY521.h"
 #include <SPI.h>
 #include <SD.h>
 #include <TinyGPSPlus.h>
 #include <CanSatKit.h>
+#include <Servo.h>
 
-#define parachutePin 5
 #define ss Serial //serial connection for gps
 
-MS5611 MS5611(0x76);  // temp+pressure
-GY521 sensor(0x68);  //gy+acc]
+
+
+using namespace CanSatKit;
+
+
+GY521 sensor(0x68);  //gy+acc
 TinyGPSPlus gps; // gps
+Servo myservo;  //servo
+BMP280 bmp; // temp+pressure
+
+
 
 const int chipSelect = 11; // select sd card adress
-
-float lastHeight = 0;
-
-const int parachuteOpenPressure = 954;
 
 uint32_t counter = 0;
 
@@ -24,7 +27,10 @@ uint32_t load, stop;
 
 static const uint32_t GPSBaud = 9600; // gps baudrate
 
-using namespace CanSatKit;
+float lastHeight = 0;
+
+const int parachuteOpenPressure = 988;
+
 
 Radio radio(Pins::Radio::ChipSelect,
             Pins::Radio::DIO0,
@@ -35,9 +41,17 @@ Radio radio(Pins::Radio::ChipSelect,
 
 Frame frame;
 
-void setup(){
+void setup()
+{
 
   SerialUSB.begin(115200);// begin serial connection baud rate
+
+
+
+
+
+  myservo.attach(9);
+
 
 
   radio.begin(); // begin radio connection
@@ -60,6 +74,17 @@ void setup(){
     SerialUSB.println("\tCould not connect to GY521");
     delay(1000);
   }
+
+  if (!bmp.begin()) {
+    // if connection failed - print message to the user
+    SerialUSB.println("BMP init failed!");
+    // the program will be 'halted' here and nothing will happen till restart
+    while (1);
+  } else {
+    // print message to the user if everything is OK
+    SerialUSB.println("BMP init success!");
+  }
+
   sensor.setAccelSensitivity(0);  // 2g
   sensor.setGyroSensitivity(0);   // 250 degrees/s
 
@@ -73,29 +98,37 @@ void setup(){
   sensor.gye = 0;
   sensor.gze = 0;
 
-  Wire.begin();
-  if (MS5611.begin() == true)
-  {
-    SerialUSB.println("MS5611 found.");
-  }
+  bmp.setOversampling(16);
 
-  pinMode(parachutePin, OUTPUT);
+
+
+
+
+
 }
 
 
 
-void loop(){
-  checkHeight();
-  
+void loop()
+{
+
+  double T, P;
+
+  myservo.write(0);
+
+  bmp.measureTemperatureAndPressure(T, P);
   //check conection to gps
   while (ss.available() > 0)
     gps.encode(ss.read());
 
-  te();// temperature
+
   gy(); // gyroscope+accelerometer
+
+  checkHeight(); //open parachute
 
   card(); // save to card
   // send gyroscope data via radio module
+  frame.print(F(","));
   frame.print(sensor.getAccelX());
   frame.print(F(","));
   frame.print(sensor.getAccelY());
@@ -107,12 +140,18 @@ void loop(){
   frame.print(sensor.getGyroY());
   frame.print(F(","));
   frame.print(sensor.getGyroZ());
-  frame.println();
-  //radio.transmit(frame);
+  frame.print(F(","));
+
   //send gps data via radio module
   frame.print(gps.location.lat(), 6);
   frame.print(F(","));
   frame.print(gps.location.lng(), 6);
+  frame.print(F(","));
+  frame.print(gps.date.day());
+  frame.print(F("/"));
+  frame.print(gps.date.month());
+  frame.print(F("/"));
+  frame.print(gps.date.year());
   frame.print(F(","));
   frame.print(gps.time.hour());
   frame.print(F(":"));
@@ -123,31 +162,38 @@ void loop(){
   frame.print(gps.altitude.meters(), 2);
   frame.print(F(","));
   frame.print(gps.speed.kmph(), 2);
-  frame.println();
+  frame.print(F(","));
+
   //radio.transmit(frame);
   //send temperature data via radio module
-  frame.print(MS5611.getTemperature(), 2);
+  frame.print(T, 2);
   frame.print(F(","));
-  frame.print(MS5611.getPressure(), 2);
-  frame.println();
+  frame.print(P, 2);
   radio.transmit(frame);
   frame.clear();
   delay(1000);
+
+  delay(1000);
+
 }
 
+void checkHeight() {
+  double T, P;
+  bmp.measureTemperatureAndPressure(T, P);
 
-void te()
-{
-  load = micros();
-  int result = MS5611.read();
-  stop = micros();
-  if (result != MS5611_READ_OK)
-  {
-    SerialUSB.print("Error in read: ");
-    SerialUSB.println(result);
+  if (lastHeight > P) {
+    if (P <= parachuteOpenPressure) {
+      myservo.write(180);
+      SerialUSB.println("OK");
+      File logFile = SD.open("log.txt", FILE_WRITE);
+      logFile.print("Parachute open. Pressure: ");
+      logFile.println(P , 2);
+    }
   }
-
+  lastHeight = P;
 }
+
+
 
 void gy() {
   sensor.read();
@@ -160,19 +206,6 @@ void gy() {
   int t = sensor.getTemperature();
 
 }
-
-void checkHeight() {
-  if(lastHeight > MS5611.getPressure()){
-    if(MS5611.getPressure() <= parachuteOpenPressure){
-      digitalWrite(parachutePin, HIGH);
-      File logFile = SD.open("log.txt", FILE_WRITE);
-      logFile.print("Parachute open. Pressure: ");
-      logFile.println(MS5611.getPressure());
-    }
-  }
-  lastHeight = MS5611.getPressure();
-}
-
 void card() {
 
 
@@ -182,6 +215,12 @@ void card() {
     gpsFile.print(gps.location.lat(), 6);
     gpsFile.print(F(","));
     gpsFile.print(gps.location.lng(), 6);
+    gpsFile.print(F(","));
+    gpsFile.print(gps.date.day());
+    gpsFile.print(F("/"));
+    gpsFile.print(gps.date.month());
+    gpsFile.print(F("/"));
+    gpsFile.print(gps.date.year());
     gpsFile.print(F(","));
     gpsFile.print(gps.time.hour());
     gpsFile.print(F(":"));
@@ -210,17 +249,22 @@ void card() {
     gyFile.print(sensor.getGyroY());
     gyFile.print(F(","));
     gyFile.print(sensor.getGyroZ());
-    gyFile.println ();
+    gyFile.println();
     gyFile.close();
     // print to the SerialUSBUSB port too:
 
   }
+
+  double T, P;
+  bmp.measureTemperatureAndPressure(T, P);
+
+
   //  save temperature data
   File teFile = SD.open("te.txt", FILE_WRITE);
   if (teFile) {
-    teFile.print(MS5611.getTemperature(), 2);
+    teFile.print(T, 2);
     teFile.print(F(","));
-    teFile.print(MS5611.getPressure(), 2);
+    teFile.print(P, 2);
     teFile.println();
     teFile.close();
   }

@@ -1,13 +1,3 @@
-/*
-  ESP32-CAM Time-lapse camera
-  esp32cam-timelapse.ino
-  Takes time-lapse pictures with ESP32-CAM
-  Saves images to MicroSD Card
- 
-  DroneBot Workshop 2022
-  https://dronebotworkshop.com
-*/
- 
 // Include Required Libraries
  
 // Camera libraries

@@ -1,3 +1,4 @@
+// Include necessary libraries
 #include "GY521.h"
 #include <SPI.h>
 #include <SD.h>
@@ -5,92 +6,74 @@
 #include <CanSatKit.h>
 #include <Servo.h>
 
-#define ss Serial //serial connection for gps
+#define ss Serial // Define ss as Serial
+
+using namespace CanSatKit; // Use the CanSatKit namespace
 
 
+GY521 sensor(0x68); // Initialize GY521 sensor with I2C address 0x68
+TinyGPSPlus gps; // Initialize TinyGPSPlus object for GPS
+Servo myservo;  // Initialize Servo 
+BMP280 bmp; // Initialize BMP280 pressure and temperature sensor
+Frame frame; // Initialize an object of type Frame
 
-using namespace CanSatKit;
+const int chipSelect = 11; // Set the chip select pin for the SD card as 11
+const uint32_t GPSBaud = 9600; // Set the GPS module baud rate to 9600
+const int servoPin = 9; // Set servo to pin 9 (D9)
 
+float calibratePressure = 0; // Calibration value for pressure sensor
+float parachuteOpenHeight = 0; // Height at which the parachute should open
+float parachuteDontOpenHeight = 0; // Height at which the parachute should not open
 
-GY521 sensor(0x68);  //gy+acc
-TinyGPSPlus gps; // gps
-Servo myservo;  //servo
-BMP280 bmp; // temp+pressure
-
-
-
-const int chipSelect = 11; // select sd card adress
-
-uint32_t counter = 0;
-
-uint32_t load, stop;
-
-static const uint32_t GPSBaud = 9600; // gps baudrate
-
-float lastHeight = 0;
-
-const int parachuteOpenPressure = 988;
+// Set high values to prevent opening parachute at start
+float height = 100000;
+float lastHeight = 100000;
+float lastLastHeight = 100000;
 
 
+// Initialize Radio object
 Radio radio(Pins::Radio::ChipSelect,
             Pins::Radio::DIO0,
             433.0,
-            Bandwidth_125000_Hz, //freqency
-            SpreadingFactor_9, //factor
-            CodingRate_4_8); //coding
+            Bandwidth_125000_Hz, // Freqency
+            SpreadingFactor_9, // Factor
+            CodingRate_4_8); // Coding
 
-Frame frame;
+void setup() {
+  SerialUSB.begin(115200); // Begin serial communication with a baud rate of 115200
 
-void setup()
-{
+  myservo.attach(servoPin); // Attache the servo motor to the digital pin
 
-  SerialUSB.begin(115200);// begin serial connection baud rate
+  radio.begin(); // Begin radio connection
 
+  ss.begin(GPSBaud); // Begin gps baudrate
 
+  Wire.begin(); // Begin I2C connection
 
-
-
-  myservo.attach(9);
-
-
-
-  radio.begin(); // begin radio connection
-
-  ss.begin(GPSBaud); // begin gps baudrate
-
-  Wire.begin(); //begin I2C connection
-
+  // Attempt to initialize the SD card
   if (!SD.begin(chipSelect)) {
-    SerialUSB.println("Card failed, or not present");
-
+    SerialUSB.println("Card failed, or not present"); // Print an error message if SD card initialization fails
     while (1);
   }
-  SerialUSB.println("card initialized.");
 
-
-  delay(100);
-  while (sensor.wakeup() == false)
-  {
-    SerialUSB.println("\tCould not connect to GY521");
+  // Attempt to initialize the gyroscope and accelerometer sensor
+  while (sensor.wakeup() == false){
+    SerialUSB.println("Could not connect to GY521"); // Print an error message if gyroscope initialization fails
     delay(1000);
   }
 
+  // Attempt to initialize the temperature and pressure sensor
   if (!bmp.begin()) {
-    // if connection failed - print message to the user
-    SerialUSB.println("BMP init failed!");
-    // the program will be 'halted' here and nothing will happen till restart
+    SerialUSB.println("BMP init failed!"); // Print an error message if BMP sensor initialization fails
     while (1);
-  } else {
-    // print message to the user if everything is OK
-    SerialUSB.println("BMP init success!");
   }
 
-  sensor.setAccelSensitivity(0);  // 2g
-  sensor.setGyroSensitivity(0);   // 250 degrees/s
+  sensor.setAccelSensitivity(0);  // Set accelerometer sensitivity to 2g
+  sensor.setGyroSensitivity(0);   // Set gyroscope sensitivity to 250 degrees/s
 
-  sensor.setThrottle();
+  sensor.setThrottle(); // Set sensor throttle (adjust the data output rate)
 
-  // set calibration values from calibration sketch.
+  // Set calibration values from calibration sketch.
   sensor.axe = 0;
   sensor.aye = 0;
   sensor.aze = 0;
@@ -98,36 +81,80 @@ void setup()
   sensor.gye = 0;
   sensor.gze = 0;
 
-  bmp.setOversampling(16);
+  bmp.setOversampling(16); // Set oversampling for BMP sensor to 16x
 
+  // Set calibration for parachute opening
+  double T, P;
+  bmp.measureTemperatureAndPressure(T, P);
+  
+  calibratePressure = P; // Assign the current pressure to the calibratePressure variable
+  
+  // Save height to file to prevent miss parachute opening
+  if (SD.exists("save.txt")) {
+    // Read calibratePressure from save.txt
+    File logFile = SD.open("save.txt", FILE_READ);
 
+    if (logFile) {
+      calibratePressure = logFile.readString().toFloat();
+      logFile.close();
+    }
+  }else{
+    // Save calibratePressure to save.txt
+    File logFile = SD.open("save.txt", FILE_WRITE);
+    
+    if (logFile) {
+      logFile.print(calibratePressure, 2);
+      logFile.close();
+    }
+  }
 
+  height = (calibratePressure - P) / 12 * 100; // Calculate height from ground to CanSat from pressure
+  parachuteOpenHeight = height + 350;  // Calculate the height at which the parachute should open
+  parachuteDontOpenHeight = height + 30; // Calculate the altitude at which the parachute should not open
 
+  SerialUSB.println("Program started"); // Print a message indicating that the program has started
 
-
+  // Save a message indicating that the program has started to log.txt
+  File logFile = SD.open("log.txt", FILE_WRITE);
+  logFile.println("Program started. Height: ");
+  logFile.print(height , 2);
+  logFile.print(" Time: ");
+  logFile.print(gps.time.hour());
+  logFile.print(F(":"));
+  logFile.print(gps.time.minute());
+  logFile.print(F(":"));
+  logFile.println(gps.time.second());
+  logFile.close();
 }
 
 
 
-void loop()
-{
+void loop() {
+  myservo.write(0); // Reset servo position
 
+  // Read temperature and pressure data
   double T, P;
-
-  myservo.write(0);
-
   bmp.measureTemperatureAndPressure(T, P);
-  //check conection to gps
+  
+  // Check GPS conection
   while (ss.available() > 0)
     gps.encode(ss.read());
 
+  // Read gyroscope and accelerometer data
+  sensor.read();
+  int ax = sensor.getAccelX();
+  int ay = sensor.getAccelY();
+  int az = sensor.getAccelZ();
+  int gx = sensor.getGyroX();
+  int gy = sensor.getGyroY();
+  int gz = sensor.getGyroZ();
+  int t = sensor.getTemperature();
 
-  gy(); // gyroscope+accelerometer
+  parachuteCheck(); // Checking whether to deploy the parachute
 
-  checkHeight(); //open parachute
-
-  card(); // save to card
-  // send gyroscope data via radio module
+  saveToSDCard(); // Save data to SD card
+  
+  // Send gyroscope and accelerometer data via radio module
   frame.print(F(","));
   frame.print(sensor.getAccelX());
   frame.print(F(","));
@@ -142,7 +169,7 @@ void loop()
   frame.print(sensor.getGyroZ());
   frame.print(F(","));
 
-  //send gps data via radio module
+  // Send GPS data via radio module
   frame.print(gps.location.lat(), 6);
   frame.print(F(","));
   frame.print(gps.location.lng(), 6);
@@ -163,53 +190,51 @@ void loop()
   frame.print(F(","));
   frame.print(gps.speed.kmph(), 2);
   frame.print(F(","));
-
-  //radio.transmit(frame);
-  //send temperature data via radio module
+  
+  // Send temperature and pressure data via radio module
   frame.print(T, 2);
   frame.print(F(","));
   frame.print(P, 2);
   radio.transmit(frame);
   frame.clear();
-  delay(1000);
 
+  // Wait 1 sec
   delay(1000);
-
 }
 
-void checkHeight() {
+void parachuteCheck() {
+  // Checking whether to deploy the parachute
   double T, P;
   bmp.measureTemperatureAndPressure(T, P);
-
-  if (lastHeight > P) {
-    if (P <= parachuteOpenPressure) {
-      myservo.write(180);
-      SerialUSB.println("OK");
+  
+  height = (calibratePressure - P) / 12 * 100; // Calculate height from ground to CanSat from pressure
+  
+  if (lastHeight > height && lastLastHeight > height){ // Check if the previous two heights are higher than the current one
+    if (height <= parachuteOpenHeight && height >= parachuteDontOpenHeight) { // Check if the current height is within the specified range
+      myservo.write(180); // Set servo position to 180 degrees to open the parachute
+      
+      // Save a message indicating that the parachute is open to log.txt
       File logFile = SD.open("log.txt", FILE_WRITE);
-      logFile.print("Parachute open. Pressure: ");
-      logFile.println(P , 2);
+      logFile.print("Parachute open. Height: ");
+      logFile.print(height , 2);
+      logFile.print(" Time: ");
+      logFile.print(gps.time.hour());
+      logFile.print(F(":"));
+      logFile.print(gps.time.minute());
+      logFile.print(F(":"));
+      logFile.println(gps.time.second());
+      logFile.close();
     }
   }
-  lastHeight = P;
+
+  lastLastHeight = lastHeight; // Update lastLastHeight with the previous value of lastHeight
+  lastHeight = height; // Update lastHeight with the current value of height
 }
 
-
-
-void gy() {
-  sensor.read();
-  int ax = sensor.getAccelX();
-  int ay = sensor.getAccelY();
-  int az = sensor.getAccelZ();
-  int gx = sensor.getGyroX();
-  int gy = sensor.getGyroY();
-  int gz = sensor.getGyroZ();
-  int t = sensor.getTemperature();
-
-}
-void card() {
-
-
-  //save gps data
+void saveToSDCard() {
+  // Save data to SD card
+  
+  // Save GPS data to gps.txt
   File gpsFile = SD.open("gps.txt", FILE_WRITE);
   if (gpsFile) {
     gpsFile.print(gps.location.lat(), 6);
@@ -234,7 +259,8 @@ void card() {
     gpsFile.println();
     gpsFile.close();
   }
-  //save gyroscope data
+  
+  // Save gyroscope and accelerometer data to gy.txt
   File gyFile = SD.open("gy.txt", FILE_WRITE);
   if (gyFile) {
     gyFile.print(F(","));
@@ -251,15 +277,12 @@ void card() {
     gyFile.print(sensor.getGyroZ());
     gyFile.println();
     gyFile.close();
-    // print to the SerialUSBUSB port too:
-
   }
 
+  // Save temperature and pressure data to te.txt
   double T, P;
   bmp.measureTemperatureAndPressure(T, P);
 
-
-  //  save temperature data
   File teFile = SD.open("te.txt", FILE_WRITE);
   if (teFile) {
     teFile.print(T, 2);

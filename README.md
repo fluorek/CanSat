@@ -1,8 +1,8 @@
-# Fly_Station GPS Connection
-
 ## Overview
 
-This guide provides instructions on how to connect the Fly_Station to GPS modules (GY-521 and GY-63), a servo motor, and ESP32-CAM. Ensure proper connections to enable communication between the Fly_Station and GPS devices, as well as control the servo motor.
+This guide provides instructions on how to connect the Fly_Station to GPS module, GY-521 (gyroscope and accelerometer), GY-63 (temperature and pressure) and a servo motor.
+
+# Fly_Station Connection
 
 ## Hardware Connections
 
@@ -40,17 +40,3 @@ This guide provides instructions on how to connect the Fly_Station to GPS module
 - **Signal (Servo) --> D9**
 - **Power (Servo) --> 5V**
 - **Ground (Servo) --> GND**
-
-# ESP32-CAM
-
-To program the ESP32-CAM, select the following settings:
-- **Board: AI Thinker ESP32-CAM**
-- **Partition Scheme: Huge app**
-
-## Important Notes
-
-- Ensure all connections are secure and follow the specified voltage levels.
-- Cross-verify the wiring with the datasheets of the respective modules.
-- Double-check the ESP32-CAM settings to match the recommended configurations.
-
-Following these guidelines will help establish a reliable connection between the Fly_Station, GPS modules, and the servo motor, facilitating seamless communication and control of the connected devices.

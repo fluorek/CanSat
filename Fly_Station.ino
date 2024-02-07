@@ -21,15 +21,7 @@ const int chipSelect = 11; // Set the chip select pin for the SD card as 11
 const uint32_t GPSBaud = 9600; // Set the GPS module baud rate to 9600
 const int servoPin = 9; // Set servo to pin 9 (D9)
 
-float calibratePressure = 0; // Calibration value for pressure sensor
-float parachuteOpenHeight = 0; // Height at which the parachute should open
-float parachuteDontOpenHeight = 0; // Height at which the parachute should not open
-
-// Set high values to prevent opening parachute at start
-float height = 100000;
-float lastHeight = 100000;
-float lastLastHeight = 100000;
-
+long calibrateTime = 0; // Calibration time for pressure opening
 
 // Initialize Radio object
 Radio radio(Pins::Radio::ChipSelect,
@@ -82,43 +74,23 @@ void setup() {
   sensor.gze = 0;
 
   bmp.setOversampling(16); // Set oversampling for BMP sensor to 16x
-
-  // Set calibration for parachute opening
-  double T, P;
-  bmp.measureTemperatureAndPressure(T, P);
-  
-  calibratePressure = P; // Assign the current pressure to the calibratePressure variable
   
   // Save height to file to prevent miss parachute opening
   if (SD.exists("save.txt")) {
-    // Read calibratePressure from save.txt
+    // Read calibrateTime from save.txt
     File logFile = SD.open("save.txt", FILE_READ);
 
     if (logFile) {
-      calibratePressure = logFile.readString().toFloat();
-      logFile.close();
-    }
-  }else{
-    // Save calibratePressure to save.txt
-    File logFile = SD.open("save.txt", FILE_WRITE);
-    
-    if (logFile) {
-      logFile.print(calibratePressure, 2);
+      calibrateTime = logFile.readString().toInt();
       logFile.close();
     }
   }
-
-  height = (calibratePressure - P) / 12 * 100; // Calculate height from ground to CanSat from pressure
-  parachuteOpenHeight = height + 350;  // Calculate the height at which the parachute should open
-  parachuteDontOpenHeight = height + 30; // Calculate the altitude at which the parachute should not open
 
   SerialUSB.println("Program started"); // Print a message indicating that the program has started
 
   // Save a message indicating that the program has started to log.txt
   File logFile = SD.open("log.txt", FILE_WRITE);
-  logFile.println("Program started. Height: ");
-  logFile.print(height , 2);
-  logFile.print(" Time: ");
+  logFile.println("Program started. Time: ");
   logFile.print(gps.time.hour());
   logFile.print(F(":"));
   logFile.print(gps.time.minute());
@@ -203,32 +175,57 @@ void loop() {
 }
 
 void parachuteCheck() {
-  // Checking whether to deploy the parachute
-  double T, P;
-  bmp.measureTemperatureAndPressure(T, P);
+  File logFile = SD.open("log.txt", FILE_WRITE);
   
-  height = (calibratePressure - P) / 12 * 100; // Calculate height from ground to CanSat from pressure
-  
-  if (lastHeight > height && lastLastHeight > height){ // Check if the previous two heights are higher than the current one
-    if (height <= parachuteOpenHeight && height >= parachuteDontOpenHeight) { // Check if the current height is within the specified range
-      myservo.write(180); // Set servo position to 180 degrees to open the parachute
+  if(analogRead(A5) <= 10){
+    
+    if(calibrateTime != 0){
+      calibrateTime = millis();
       
-      // Save a message indicating that the parachute is open to log.txt
-      File logFile = SD.open("log.txt", FILE_WRITE);
-      logFile.print("Parachute open. Height: ");
-      logFile.print(height , 2);
-      logFile.print(" Time: ");
+      File saveFile = SD.open("save.txt", FILE_WRITE);
+
+      if (saveFile) {
+        saveFile.seek(0);
+        saveFile.print(calibrateTime, 2);
+        saveFile.close();
+      }
+      
+      logFile.print("Out of rocket. Time: ");
       logFile.print(gps.time.hour());
       logFile.print(F(":"));
       logFile.print(gps.time.minute());
       logFile.print(F(":"));
       logFile.println(gps.time.second());
-      logFile.close();
     }
-  }
+    
+    if (millis() - startTime >= 30000) {
+      myservo.write(180); // Set servo position to 180 degrees to open the parachute
 
-  lastLastHeight = lastHeight; // Update lastLastHeight with the previous value of lastHeight
-  lastHeight = height; // Update lastHeight with the current value of height
+      // Save a message indicating that the parachute is open to log.txt
+      logFile.print("Secure parachute open. Time: ");
+      logFile.print(gps.time.hour());
+      logFile.print(F(":"));
+      logFile.print(gps.time.minute());
+      logFile.print(F(":"));
+      logFile.println(gps.time.second());
+
+      frame.print(F(","));
+      frame.print("True");
+    }else{
+      frame.print(F(","));
+      frame.print("False");
+    }
+    
+    frame.print(F(","));
+    frame.print("True");
+  }else{
+    frame.print(F(","));
+    frame.print("False");
+    frame.print(F(","));
+    frame.print("False");
+  }
+  
+  logFile.close();
 }
 
 void saveToSDCard() {

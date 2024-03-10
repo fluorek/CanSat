@@ -21,7 +21,9 @@ const int chipSelect = 11; // Set the chip select pin for the SD card as 11
 const uint32_t GPSBaud = 9600; // Set the GPS module baud rate to 9600
 const int servoPin = 9; // Set servo to pin 9 (D9)
 
-long calibrateTime = 0; // Calibration time for pressure opening
+bool started = false;
+long elapsedTime = 0;
+long calibrateTime = 0;
 
 // Initialize Radio object
 Radio radio(Pins::Radio::ChipSelect,
@@ -78,14 +80,19 @@ void setup() {
   // Save height to file to prevent miss parachute opening
   if (SD.exists("save.txt")) {
     // Read calibrateTime from save.txt
-    File logFile = SD.open("save.txt", FILE_READ);
+    File saveFile = SD.open("save.txt", FILE_READ);
 
-    if (logFile) {
-      calibrateTime = logFile.readString().toInt();
-      logFile.close();
+    if (saveFile) {
+      String line1 = saveFile.readStringUntil(',');
+      started = line1.toInt() == 1 ? true : false;
+      String line2 = saveFile.readStringUntil('\n');
+      elapsedTime = line2.toInt();
+      saveFile.close();
     }
   }
 
+  myservo.write(180); // Reset servo position
+  
   SerialUSB.println("Program started"); // Print a message indicating that the program has started
 
   // Save a message indicating that the program has started to log.txt
@@ -102,7 +109,6 @@ void setup() {
 
 
 void loop() {
-  myservo.write(0); // Reset servo position
 
   // Read temperature and pressure data
   double T, P;
@@ -177,53 +183,55 @@ void loop() {
 void parachuteCheck() {
   File logFile = SD.open("log.txt", FILE_WRITE);
   
-  if(analogRead(A5) <= 10){
-    
-    if(calibrateTime != 0){
-      calibrateTime = millis();
-      
-      File saveFile = SD.open("save.txt", FILE_WRITE);
+  SerialUSB.println(analogRead(A0));
+  SerialUSB.println(millis());
+  SerialUSB.println(started);
+  SerialUSB.println(elapsedTime);
+  SerialUSB.println(calibrateTime);
+  
+  if(analogRead(A0) >= 600 && millis() >= 60000 && !started){ 
+    started = true;
+  }
 
-      if (saveFile) {
-        saveFile.seek(0);
-        saveFile.print(calibrateTime, 2);
-        saveFile.close();
-      }
-      
-      logFile.print("Out of rocket. Time: ");
-      logFile.print(gps.time.hour());
-      logFile.print(F(":"));
-      logFile.print(gps.time.minute());
-      logFile.print(F(":"));
-      logFile.println(gps.time.second());
-    }
-    
-    if (millis() - startTime >= 30000) {
-      myservo.write(180); // Set servo position to 180 degrees to open the parachute
+  if(started){
+    frame.print("True");
+  }else{
+    frame.print("False");
+  }
 
-      // Save a message indicating that the parachute is open to log.txt
-      logFile.print("Secure parachute open. Time: ");
-      logFile.print(gps.time.hour());
-      logFile.print(F(":"));
-      logFile.print(gps.time.minute());
-      logFile.print(F(":"));
-      logFile.println(gps.time.second());
+  if(started && analogRead(A0) <= 500 && calibrateTime == 0){
+    calibrateTime = millis();
+  }
+  
+  if (millis() - calibrateTime + elapsedTime >= 30000 && calibrateTime != 0 && started) {
+    myservo.write(0); // Set servo position to 180 degrees to open the parachute
 
-      frame.print(F(","));
-      frame.print("True");
-    }else{
-      frame.print(F(","));
-      frame.print("False");
-    }
-    
+    // Save a message indicating that the parachute is open to log.txt
+    logFile.print("Secure parachute open. Time: ");
+    logFile.print(gps.time.hour());
+    logFile.print(F(":"));
+    logFile.print(gps.time.minute());
+    logFile.print(F(":"));
+    logFile.println(gps.time.second());
+
     frame.print(F(","));
     frame.print("True");
   }else{
     frame.print(F(","));
     frame.print("False");
-    frame.print(F(","));
-    frame.print("False");
   }
+
+
+
+  SD.remove("save.txt");
+  File saveFile = SD.open("save.txt", FILE_WRITE);
+  if (saveFile) {
+    saveFile.println(started ? 1 : 0);
+    saveFile.print(",");
+    saveFile.print(millis() - calibrateTime + elapsedTime);
+    saveFile.close();
+  }
+
   
   logFile.close();
 }

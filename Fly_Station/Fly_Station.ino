@@ -170,7 +170,7 @@ void loop() {
   frame.print(F(","));
   
   // Send temperature and pressure data via radio module
-  frame.print(T, 2);
+  frame.print(T - 9, 2);
   frame.print(F(","));
   frame.print(P, 2);
   radio.transmit(frame);
@@ -295,7 +295,7 @@ void saveToSDCard() {
 
   File teFile = SD.open("te.txt", FILE_WRITE);
   if (teFile) {
-    teFile.print(T, 2);
+    teFile.print(T - 9, 2);
     teFile.print(F(","));
     teFile.print(P, 2);
     teFile.println();
